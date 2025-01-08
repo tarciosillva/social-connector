@@ -10,7 +10,7 @@ COPY . .
 
 RUN go build -o social-connector .
 
-FROM debian:bullseye-slim
+FROM alpine:3.16 AS binary
 
 WORKDIR /app
 
