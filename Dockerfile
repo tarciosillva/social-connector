@@ -16,9 +16,10 @@ WORKDIR /app
 
 COPY --from=builder /app/social-connector .
 
-EXPOSE 8001
-
 RUN apk add --no-cache tzdata && \
     chmod +x /app/social-connector
 
-CMD ["/app/social-connector"]
+EXPOSE 8001
+
+CMD ["./social-connector"]
+
