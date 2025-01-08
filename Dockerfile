@@ -16,6 +16,6 @@ WORKDIR /app
 
 COPY --from=builder /app/social-connector .
 
-EXPOSE 8080
+EXPOSE 8001
 
 CMD ["./social-connector"]
