@@ -8,10 +8,15 @@ import (
 	"os"
 	"os/signal"
 	"social-connector/internal/config"
+	"social-connector/internal/domain/entities"
+	Iservices "social-connector/internal/domain/interfaces/services"
 	"social-connector/internal/infra/handlers"
 	"social-connector/internal/infra/logger"
+	"social-connector/internal/infra/repository"
 	"social-connector/internal/infra/routes"
+	"social-connector/internal/infra/services"
 	"social-connector/internal/middleware"
+	client "social-connector/internal/pkg"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -23,12 +28,19 @@ func main() {
 	ctx := context.Background()
 	log := logger.NewLogger(ctx, true)
 
+	mongoClient := client.MongoClient()
+	userContextDB := mongoClient.Database("UserContext")
+
 	router := mux.NewRouter()
 	router.Use(middleware.LoggingMiddleware(log))
 
+	userContextRepo := repository.NewMongoRepository[entities.UserContext](userContextDB)
+
+	var userContextSvc Iservices.IUserContextService = services.NewUserContextService(userContextRepo, ctx, log)
+
 	verifyToken := config.GetEnv("API_KEY")
 
-	transactionHandlers := handlers.NewHttpHandlers(log, verifyToken)
+	transactionHandlers := handlers.NewHttpHandlers(log, verifyToken, userContextSvc)
 
 	routes := routes.NewRoutes(
 		router,

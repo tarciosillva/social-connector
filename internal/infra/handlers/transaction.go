@@ -8,17 +8,22 @@ import (
 	"net/http"
 	"social-connector/internal/config"
 	"social-connector/internal/domain/dto"
+	"social-connector/internal/domain/entities"
+	Iservices "social-connector/internal/domain/interfaces/services"
 	"social-connector/internal/infra/logger"
 	"social-connector/internal/util"
+	"strings"
+	"time"
 )
 
 type HttpHandlers struct {
-	Logger      *logger.Logger
-	VerifyToken string
+	Logger             *logger.Logger
+	VerifyToken        string
+	UserContextService Iservices.IUserContextService
 }
 
-func NewHttpHandlers(logger *logger.Logger, verifyToken string) *HttpHandlers {
-	return &HttpHandlers{Logger: logger, VerifyToken: verifyToken}
+func NewHttpHandlers(logger *logger.Logger, verifyToken string, userContextService Iservices.IUserContextService) *HttpHandlers {
+	return &HttpHandlers{Logger: logger, VerifyToken: verifyToken, UserContextService: userContextService}
 }
 
 // Webhook is a unified handler for WhatsApp webhook requests.
@@ -106,6 +111,8 @@ func (th *HttpHandlers) handleVerification(w http.ResponseWriter, r *http.Reques
 func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Request) {
 	var body dto.IWebhookMessage
 
+	th.Logger.Info("Starting to process incoming webhook event.")
+
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		th.Logger.Error(fmt.Sprintf("Invalid JSON payload: %s", err.Error()))
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -119,21 +126,96 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 	}
 
 	lastEntry := body.Entry[len(body.Entry)-1]
+
+	if len(lastEntry.Changes) == 0 {
+		th.Logger.Warn("Received entry with no changes.")
+		http.Error(w, "No changes found in the last entry", http.StatusBadRequest)
+		return
+	}
+
 	lastChange := lastEntry.Changes[len(lastEntry.Changes)-1]
+
+	if len(lastChange.Value.Messages) == 0 {
+		th.Logger.Warn("Received change with no messages.")
+		http.Error(w, "No messages found in the last change", http.StatusBadRequest)
+		return
+	}
+
 	lastMessage := lastChange.Value.Messages[len(lastChange.Value.Messages)-1]
 
 	from := lastMessage.From
-	text := lastMessage.Text.Body
+	userQuery := lastMessage.Text.Body
+	conversationalId := lastChange.Value.Metadata.PhoneNumberID
 
-	result, err := th.executeQueryAI(text)
+	th.Logger.Info(fmt.Sprintf("Conversation ID: %s, From: %s, User query: %s", conversationalId, from, userQuery))
+
+	userContext, err := th.UserContextService.FindContext(conversationalId)
 	if err != nil {
+		th.Logger.Info(fmt.Sprintf("Context not found for conversation ID %s. Initializing new context.", conversationalId))
+		userContext = entities.UserContext{
+			ConversationID: conversationalId,
+			Transcript:     []entities.Transcript{},
+			Context:        "",
+		}
+	}
+
+	userContext.Transcript = append(userContext.Transcript, entities.Transcript{
+		Role:      "user",
+		Message:   userQuery,
+		Timestamp: time.Now(),
+	})
+
+	result, err := th.executeQueryAI(userQuery, userContext.Context)
+	if err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to execute AI query: %s", err.Error()))
+		http.Error(w, "Error processing the AI query", http.StatusInternalServerError)
+		return
+	}
+
+	userContext.Transcript = append(userContext.Transcript, entities.Transcript{
+		Role:      "agent",
+		Message:   result.Response,
+		Timestamp: time.Now(),
+	})
+
+	if len(userContext.Transcript) >= 2 {
+		th.Logger.Info("Updating conversation context with the last agent response.")
+		agentMessage := userContext.Transcript[len(userContext.Transcript)-1].Message
+		userContext.Context = agentMessage
+	} else {
+		th.Logger.Info("Setting initial conversation context with the AI response.")
+		userContext.Context = result.Response
+	}
+
+	userContext.UpdatedAt = time.Now()
+	_, err = th.UserContextService.UpdateUserContext(conversationalId, userContext)
+	if err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to update user context: %s", err.Error()))
+		http.Error(w, "Error updating user context", http.StatusInternalServerError)
 		return
 	}
 
 	to := util.AddNineToPhoneNumber(from)
+	messagesSplit := strings.Split(result.Response, ".")
 
-	th.sendWhatsAppMessage(to, result.Response)
+	th.Logger.Info(fmt.Sprintf("Sending AI response messages to WhatsApp number: %s", to))
+	for i, message := range messagesSplit {
+		if message != "" {
+			th.Logger.Info(fmt.Sprintf("Sending message: '%s'", message))
+			if i > 0 {
+				th.Logger.Info("Adding delay before sending subsequent messages.")
+				time.Sleep(2 * time.Second)
+			}
+			err = th.sendWhatsAppMessage(to, message)
+			if err != nil {
+				th.Logger.Error(fmt.Sprintf("Failed to send WhatsApp message to %s: %s", to, err.Error()))
+				http.Error(w, "Error sending WhatsApp message", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 
+	th.Logger.Info("Webhook event processed successfully.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("EVENT_RECEIVED"))
 }
@@ -152,7 +234,7 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 // Note:
 // This function depends on an AI service integration, such as OpenAI, Google Cloud AI,
 // or another machine learning model API.
-func (th *HttpHandlers) executeQueryAI(queryText string) (dto.QueryAIResponse, error) {
+func (th *HttpHandlers) executeQueryAI(queryText string, context string) (dto.QueryAIResponse, error) {
 	queryAIHost := config.GetEnv("QUERY_AI_API_HOST")
 	if queryAIHost == "" {
 		err := "QUERY_AI_API_HOST environment variable not set."
@@ -161,7 +243,8 @@ func (th *HttpHandlers) executeQueryAI(queryText string) (dto.QueryAIResponse, e
 	}
 
 	payload := map[string]string{
-		"query_text": queryText,
+		"query_text":      queryText,
+		"message_context": context,
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
