@@ -109,9 +109,9 @@ func (th *HttpHandlers) handleVerification(w http.ResponseWriter, r *http.Reques
 // - Respond with HTTP status 200 and an empty body to acknowledge receipt of the event.
 // - If an error occurs during processing, respond with an appropriate HTTP status code.
 func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Request) {
-	var body dto.IWebhookMessage
-
 	th.Logger.Info("Starting to process incoming webhook event.")
+
+	var body dto.IWebhookMessage
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		th.Logger.Error(fmt.Sprintf("Invalid JSON payload: %s", err.Error()))
@@ -149,71 +149,70 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 
 	th.Logger.Info(fmt.Sprintf("Conversation ID: %s, From: %s, User query: %s", conversationalId, from, userQuery))
 
-	userContext, err := th.UserContextService.FindContext(conversationalId)
-	if err != nil {
-		th.Logger.Info(fmt.Sprintf("Context not found for conversation ID %s. Initializing new context.", conversationalId))
-		userContext = entities.UserContext{
-			ConversationID: conversationalId,
-			Transcript:     []entities.Transcript{},
-			Context:        "",
-		}
-	}
-
-	userContext.Transcript = append(userContext.Transcript, entities.Transcript{
-		Role:      "user",
-		Message:   userQuery,
-		Timestamp: time.Now(),
-	})
-
-	result, err := th.executeQueryAI(userQuery, userContext.Context)
-	if err != nil {
-		th.Logger.Error(fmt.Sprintf("Failed to execute AI query: %s", err.Error()))
-		http.Error(w, "Error processing the AI query", http.StatusInternalServerError)
-		return
-	}
-
-	userContext.Transcript = append(userContext.Transcript, entities.Transcript{
-		Role:      "agent",
-		Message:   result.Response,
-		Timestamp: time.Now(),
-	})
-
-	if len(userContext.Transcript) >= 2 {
-		th.Logger.Info("Updating conversation context with the last agent response.")
-		agentMessage := userContext.Transcript[len(userContext.Transcript)-1].Message
-		userContext.Context = agentMessage
-	} else {
-		th.Logger.Info("Setting initial conversation context with the AI response.")
-		userContext.Context = result.Response
-	}
-
-	userContext.UpdatedAt = time.Now()
-	_, err = th.UserContextService.UpdateUserContext(conversationalId, userContext)
-	if err != nil {
-		th.Logger.Error(fmt.Sprintf("Failed to update user context: %s", err.Error()))
-		http.Error(w, "Error updating user context", http.StatusInternalServerError)
-		return
-	}
-
-	to := util.AddNineToPhoneNumber(from)
-	messagesSplit := strings.Split(result.Response, ".")
-
-	th.Logger.Info(fmt.Sprintf("Sending AI response messages to WhatsApp number: %s", to))
-	for i, message := range messagesSplit {
-		if message != "" {
-			th.Logger.Info(fmt.Sprintf("Sending message: '%s'", message))
-			if i > 0 {
-				th.Logger.Info("Adding delay before sending subsequent messages.")
-				time.Sleep(2 * time.Second)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				th.Logger.Error(fmt.Sprintf("Recovered from panic: %v", r))
 			}
-			err = th.sendWhatsAppMessage(to, message)
-			if err != nil {
-				th.Logger.Error(fmt.Sprintf("Failed to send WhatsApp message to %s: %s", to, err.Error()))
-				http.Error(w, "Error sending WhatsApp message", http.StatusInternalServerError)
-				return
+		}()
+
+		userContext, err := th.UserContextService.FindContext(conversationalId)
+		if err != nil {
+			th.Logger.Info(fmt.Sprintf("Context not found for conversation ID %s. Initializing new context.", conversationalId))
+			userContext = entities.UserContext{
+				ConversationID: conversationalId,
+				Transcript:     []entities.Transcript{},
+				Context:        "",
 			}
 		}
-	}
+
+		userContext.Transcript = append(userContext.Transcript, entities.Transcript{
+			Role:      "user",
+			Message:   userQuery,
+			Timestamp: time.Now(),
+		})
+
+		result, err := th.executeQueryAI(userQuery, userContext.Context)
+		if err != nil {
+			th.Logger.Error(fmt.Sprintf("Failed to execute AI query: %s", err.Error()))
+			return
+		}
+
+		userContext.Transcript = append(userContext.Transcript, entities.Transcript{
+			Role:      "agent",
+			Message:   result.Response,
+			Timestamp: time.Now(),
+		})
+
+		if len(userContext.Transcript) > 1 {
+			lastAgentMessage := userContext.Transcript[len(userContext.Transcript)-1].Message
+			userContext.Context = lastAgentMessage
+		} else {
+			userContext.Context = result.Response
+		}
+
+		userContext.UpdatedAt = time.Now()
+		if _, err := th.UserContextService.UpdateUserContext(conversationalId, userContext); err != nil {
+			th.Logger.Error(fmt.Sprintf("Failed to update user context: %s", err.Error()))
+			return
+		}
+
+		to := util.AddNineToPhoneNumber(from)
+		messagesSplit := strings.Split(result.Response, ".")
+
+		th.Logger.Info(fmt.Sprintf("Sending AI response messages to WhatsApp number: %s", to))
+		for i, message := range messagesSplit {
+			if strings.TrimSpace(message) != "" {
+				if i > 0 {
+					time.Sleep(2 * time.Second) // Add delay between messages
+				}
+				if err := th.sendWhatsAppMessage(to, message); err != nil {
+					th.Logger.Error(fmt.Sprintf("Failed to send WhatsApp message to %s: %s", to, err.Error()))
+					return
+				}
+			}
+		}
+	}()
 
 	th.Logger.Info("Webhook event processed successfully.")
 	w.WriteHeader(http.StatusOK)

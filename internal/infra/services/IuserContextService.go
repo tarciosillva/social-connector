@@ -48,9 +48,6 @@ func (ucs *UserContextService) FindContext(conversationID string) (entities.User
 
 // UpdateUserContext updates a UserContext by ID.
 func (ucs *UserContextService) UpdateUserContext(conversationalId string, entity entities.UserContext) (entities.UserContext, error) {
-	// Garantir que o campo _id seja removido para evitar conflito
-	entity.ID = "" // Definir explicitamente como vazio
-
 	// Agora, chama o repositório para atualizar
 	result, err := ucs.UserContextRepository.Update(ucs.Ctx, repocontants.USER_CONTEXT_COLLECTION, conversationalId, entity)
 	if err != nil {
