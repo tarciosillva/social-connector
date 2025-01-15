@@ -146,7 +146,7 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 
 	from := lastMessage.From
 	userQuery := lastMessage.Text.Body
-	conversationalId := lastChange.Value.Metadata.DisplayPhoneNumber
+	conversationalId := from
 
 	th.Logger.Info(fmt.Sprintf("Conversation ID: %s, From: %s, User query: %s", conversationalId, from, userQuery))
 
