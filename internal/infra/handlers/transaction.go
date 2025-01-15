@@ -137,7 +137,8 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 
 	if len(lastChange.Value.Messages) == 0 {
 		th.Logger.Warn("Received change with no messages.")
-		http.Error(w, "No messages found in the last change", http.StatusBadRequest)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("EVENT_RECEIVED"))
 		return
 	}
 
@@ -145,7 +146,7 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 
 	from := lastMessage.From
 	userQuery := lastMessage.Text.Body
-	conversationalId := lastChange.Value.Metadata.PhoneNumberID
+	conversationalId := lastChange.Value.Metadata.DisplayPhoneNumber
 
 	th.Logger.Info(fmt.Sprintf("Conversation ID: %s, From: %s, User query: %s", conversationalId, from, userQuery))
 
@@ -163,6 +164,11 @@ func (th *HttpHandlers) handleWebhookEvent(w http.ResponseWriter, r *http.Reques
 				ConversationID: conversationalId,
 				Transcript:     []entities.Transcript{},
 				Context:        "",
+			}
+
+			err := th.UserContextService.Create(userContext)
+			if err != nil {
+				th.Logger.Error(fmt.Sprintf("Error to create a new context to %s. Err: %v", conversationalId, err))
 			}
 		}
 
