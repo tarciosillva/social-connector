@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -8,9 +9,9 @@ import (
 )
 
 func LoadEnv() error {
-	err := godotenv.Load()
+	err := godotenv.Load(".env")
 	if err != nil {
-		log.Println("Erro ao carregar o arquivo .env")
+		log.Println(fmt.Printf("Erro ao carregar o arquivo .env:%v", err))
 		return err
 	}
 	return nil

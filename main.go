@@ -37,14 +37,19 @@ func main() {
 	userContextRepo := repository.NewMongoRepository[entities.UserContext](userContextDB)
 
 	var userContextSvc Iservices.IUserContextService = services.NewUserContextService(userContextRepo, ctx, log)
+	var queryAIService Iservices.IQueryAIService = services.NewQueryAIService(log)
+
+	httpClient := http.Client{}
 
 	verifyToken := config.GetEnv("API_KEY")
 
-	transactionHandlers := handlers.NewHttpHandlers(log, verifyToken, userContextSvc)
+	transactionHandlers := handlers.NewHttpHandlers(log, verifyToken, userContextSvc, queryAIService)
+	infobipHandlers := handlers.NewInfobipHandlers(log, userContextSvc, queryAIService, &httpClient)
 
 	routes := routes.NewRoutes(
 		router,
 		transactionHandlers,
+		infobipHandlers,
 	)
 
 	routes.Init()

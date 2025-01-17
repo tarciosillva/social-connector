@@ -9,16 +9,28 @@ import (
 )
 
 type Routes struct {
-	Mux         *mux.Router
-	HttpHandler *handlers.HttpHandlers
+	Mux            *mux.Router
+	HttpHandler    *handlers.HttpHandlers
+	InfobipHandler *handlers.InfobipHandlers
 }
 
-func NewRoutes(mux *mux.Router, HttpHandler *handlers.HttpHandlers) *Routes {
-	return &Routes{mux, HttpHandler}
+func NewRoutes(mux *mux.Router, HttpHandler *handlers.HttpHandlers, InfobipHandler *handlers.InfobipHandlers) *Routes {
+	return &Routes{mux, HttpHandler, InfobipHandler}
+}
+
+// Estruturas para processar o JSON recebido
+type Message struct {
+	From string `json:"from"`
+	Text string `json:"text"`
+}
+
+type WebhookRequest struct {
+	Messages []Message `json:"messages"`
 }
 
 func (r *Routes) Init() {
-	r.Mux.HandleFunc("/webhook", r.HttpHandler.Webhook)
+	r.Mux.HandleFunc("/webhook", r.HttpHandler.MetaWebhook)
+	r.Mux.HandleFunc("/infobip-webhook", r.InfobipHandler.InfoBipWebhook)
 
 	r.Mux.HandleFunc("/healthCheck", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
