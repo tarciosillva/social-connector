@@ -74,3 +74,58 @@ func (th *QueryAIService) ExecuteQueryAI(queryText string, context string) (dto.
 
 	return queryResponse, nil
 }
+
+// ExecuteAudioQueryAI processes a audio using an AI service and returns the response.
+//
+// Parameters:
+// - audioUrl (string): The audio query to be processed by the AI service.
+//
+// Returns:
+//   - dto.QueryAIResponse: A structured response object containing the AI's output,
+//     which may include answers, insights, or any relevant data returned by the AI.
+//   - error: Returns an error if the query processing fails or if there is an issue
+//     with the integration to the AI service. Returns nil if the query is processed successfully.
+//
+// Note:
+// This function depends on an AI service integration, such as OpenAI, Google Cloud AI,
+// or another machine learning model API.
+func (th *QueryAIService) ExecuteAudioQueryAI(audioUrl string, audioAuth string, context string) (dto.VoiceQueryAIResponse, error) {
+	queryAIHost := config.GetEnv("QUERY_AI_API_HOST")
+	if queryAIHost == "" {
+		err := "QUERY_AI_API_HOST environment variable not set."
+		th.Logger.Error(err)
+		return dto.VoiceQueryAIResponse{}, fmt.Errorf("%s", err)
+	}
+
+	payload := map[string]string{
+		"audio_url":       audioUrl,
+		"audio_auth":      audioAuth,
+		"message_context": context,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to marshal payload: %s", err.Error()))
+		return dto.VoiceQueryAIResponse{}, err
+	}
+
+	resp, err := http.Post(queryAIHost+"/voiceQuery", "application/json", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to send POST request: %s", err.Error()))
+		return dto.VoiceQueryAIResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to read response body: %s", err.Error()))
+		return dto.VoiceQueryAIResponse{}, err
+	}
+
+	var queryResponse dto.VoiceQueryAIResponse
+	if err := json.Unmarshal(body, &queryResponse); err != nil {
+		th.Logger.Error(fmt.Sprintf("Failed to unmarshal response body: %s", err.Error()))
+		return dto.VoiceQueryAIResponse{}, fmt.Errorf("failed to unmarshal response body: %w", err)
+	}
+
+	return queryResponse, nil
+}

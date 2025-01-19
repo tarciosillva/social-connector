@@ -21,3 +21,8 @@ type URLOptions struct {
 	RemoveProtocol bool   `json:"removeProtocol"`
 	CustomDomain   string `json:"customDomain"`
 }
+
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+}

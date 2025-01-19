@@ -12,6 +12,7 @@ import (
 	Iservices "social-connector/internal/domain/interfaces/services"
 	"social-connector/internal/infra/handlers"
 	"social-connector/internal/infra/logger"
+	"social-connector/internal/infra/provider"
 	"social-connector/internal/infra/repository"
 	"social-connector/internal/infra/routes"
 	"social-connector/internal/infra/services"
@@ -34,17 +35,22 @@ func main() {
 	router := mux.NewRouter()
 	router.Use(middleware.LoggingMiddleware(log))
 
+	httpClient := http.Client{}
+
 	userContextRepo := repository.NewMongoRepository[entities.UserContext](userContextDB)
+
+	var whatsAppProvider provider.IWhatsAppProvider = provider.NewInfobipWhatsAppProvider(log, &httpClient)
 
 	var userContextSvc Iservices.IUserContextService = services.NewUserContextService(userContextRepo, ctx, log)
 	var queryAIService Iservices.IQueryAIService = services.NewQueryAIService(log)
-
-	httpClient := http.Client{}
+	var channelService Iservices.IChannelServices = services.NewChannelService(log, userContextSvc, queryAIService, whatsAppProvider)
 
 	verifyToken := config.GetEnv("API_KEY")
 
+	//Meta whatsApp business
 	transactionHandlers := handlers.NewHttpHandlers(log, verifyToken, userContextSvc, queryAIService)
-	infobipHandlers := handlers.NewInfobipHandlers(log, userContextSvc, queryAIService, &httpClient)
+
+	infobipHandlers := handlers.NewInfobipHandlers(log, channelService)
 
 	routes := routes.NewRoutes(
 		router,
