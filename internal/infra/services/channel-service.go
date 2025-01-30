@@ -23,34 +23,53 @@ func NewChannelService(logger *logger.Logger, userContextService Iservices.IUser
 }
 
 func (th *ChannelService) WebhookService(webhookDto *dto.InboundResponse) {
-	messageType := webhookDto.Results[webhookDto.MessageCount-1].Message.Type
-	lastMessage := webhookDto.Results[webhookDto.MessageCount-1].Message.Text
-	userAudioUrl := webhookDto.Results[webhookDto.MessageCount-1].Message.Url
+	// messageType := webhookDto.Results[webhookDto.MessageCount-1].Message.Type
+	// lastMessage := webhookDto.Results[webhookDto.MessageCount-1].Message.Text
+	// userAudioUrl := webhookDto.Results[webhookDto.MessageCount-1].Message.Url
 	to := webhookDto.Results[webhookDto.MessageCount-1].From
 
-	userContext, err := th.UserContextService.FindContext(to)
-	if err != nil {
-		th.Logger.Warn(fmt.Sprintf("Context not found for conversation ID %s. Initializing new context.", to))
-		userContext = entities.UserContext{
-			ConversationID: to,
-			Transcript:     []entities.Transcript{},
-			Context:        "",
-		}
+	messagesSplit := []string{
+		"Olá! Chegamos ao fim da minha versão beta inicial e agora farei uma pausa para manutenção e melhorias",
+		"Agradeço pela compreensão. 😊",
+	}
 
-		err := th.UserContextService.Create(userContext)
-		if err != nil {
-			th.Logger.Error(fmt.Sprintf("Error to create a new context to %s. Err: %v", to, err))
+	for i, message := range messagesSplit {
+		if strings.TrimSpace(message) != "" {
+			if i > 0 {
+				time.Sleep(2 * time.Second)
+			}
+			if err := th.WhatsAppProvider.SendTextMessage(to, message); err != nil {
+				th.Logger.Error(fmt.Sprintf("Failed to send WhatsApp message to %s: %s", to, err.Error()))
+				return
+			}
 		}
 	}
 
-	switch messageType {
-	case "TEXT":
-		th.processText(lastMessage, userContext, to)
-	case "AUDIO":
-		th.processAudio(userAudioUrl, userContext, to)
-	default:
-		th.Logger.Warn("Unavailable message type")
-	}
+	return
+
+	// userContext, err := th.UserContextService.FindContext(to)
+	// if err != nil {
+	// 	th.Logger.Warn(fmt.Sprintf("Context not found for conversation ID %s. Initializing new context.", to))
+	// 	userContext = entities.UserContext{
+	// 		ConversationID: to,
+	// 		Transcript:     []entities.Transcript{},
+	// 		Context:        "",
+	// 	}
+
+	// 	err := th.UserContextService.Create(userContext)
+	// 	if err != nil {
+	// 		th.Logger.Error(fmt.Sprintf("Error to create a new context to %s. Err: %v", to, err))
+	// 	}
+	// }
+
+	// switch messageType {
+	// case "TEXT":
+	// 	th.processText(lastMessage, userContext, to)
+	// case "AUDIO":
+	// 	th.processAudio(userAudioUrl, userContext, to)
+	// default:
+	// 	th.Logger.Warn("Unavailable message type")
+	// }
 }
 
 func (cs *ChannelService) processText(lastMessage string, userContext entities.UserContext, to string) {
